@@ -236,8 +236,7 @@ void LeakyReLU(Tensor *inout, cudaStream_t stream) {
  * @param [in2] weight: [K, C, R, S]
  * @param [in3]   bias: [K]
  * @param [out]    out: [N, K, OH, OW]
- */
-__global__ void Conv2d_kernel(half *in, half *weight, half *bias, half *out,
+ */__global__ void Conv2d_kernel(half *in, half *weight, half *bias, half *out,
                               size_t N, size_t C, size_t H, size_t W,
                               size_t K, size_t R, size_t S,
                               size_t OH, size_t OW,
@@ -248,17 +247,36 @@ __global__ void Conv2d_kernel(half *in, half *weight, half *bias, half *out,
     int ow_block = blockIdx.z % ((OW + blockDim.y - 1) / blockDim.y);
     int oh = oh_block * blockDim.x + threadIdx.x;
     int ow = ow_block * blockDim.y + threadIdx.y;
-
     if (oh < OH && ow < OW) {
         half sum = bias[k];
         for (int c = 0; c < C; c++) {
             for (int r = 0; r < R; r++) {
-                for (int s = 0; s < S; s++) {
-                    int h = oh * stride - pad + r * dilation;
-                    int w = ow * stride - pad + s * dilation;
-                    if (h >= 0 && h < H && w >= 0 && w < W) {
-                        sum = __hadd(sum, __hmul(in[n * C * H * W + c * H * W + h * W + w],
-                                                 weight[k * C * R * S + c * R * S + r * S + s]));
+                int h = oh * stride - pad + r * dilation;
+                int w = ow * stride - pad;
+
+                if (S >= 32) {
+                    #pragma unroll
+                    for (int s = 0; s < 32; s++) {
+                        if (h >= 0 && h < H && w >= 0 && w < W) {
+                            sum = __hadd(sum, __hmul(in[n * C * H * W + c * H * W + h * W + w],
+                                                     weight[k * C * R * S + c * R * S + r * S + s]));
+                        }
+                        w += dilation;
+                    }
+                    for (int s = 32; s < S; s++) {
+                        if (h >= 0 && h < H && w >= 0 && w < W) {
+                            sum = __hadd(sum, __hmul(in[n * C * H * W + c * H * W + h * W + w],
+                                                     weight[k * C * R * S + c * R * S + r * S + s]));
+                        }
+                        w += dilation;
+                    }
+                } else {
+                    for (int s = 0; s < S; s++) {
+                        if (h >= 0 && h < H && w >= 0 && w < W) {
+                            sum = __hadd(sum, __hmul(in[n * C * H * W + c * H * W + h * W + w],
+                                                     weight[k * C * R * S + c * R * S + r * S + s]));
+                        }
+                        w += dilation;
                     }
                 }
             }
